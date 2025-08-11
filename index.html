@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review Classifier</title>
+    <!-- Tailwind CSS for a modern, responsive design -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8; /* A light, soft background */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-lg w-full">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">Review Categorization Tool</h1>
+        <p class="text-center text-gray-600 mb-8">Enter a review and get a category prediction powered by a Naive Bayes model.</p>
+
+        <div class="mb-6">
+            <label for="review-input" class="block text-gray-700 font-semibold mb-2">Review Text</label>
+            <textarea
+                id="review-input"
+                class="w-full h-32 p-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 transition-all resize-none"
+                placeholder="e.g., 'I just bought a new gadget, and the performance is amazing!'"
+            ></textarea>
+        </div>
+
+        <button
+            id="predict-button"
+            class="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+        >
+            Predict Category
+        </button>
+
+        <!-- Loading spinner -->
+        <div id="loading" class="mt-4 text-center hidden">
+            <svg class="animate-spin h-5 w-5 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        </div>
+
+        <div id="results" class="mt-8 p-6 bg-gray-50 border border-gray-200 rounded-xl hidden">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 text-center">Prediction Results</h3>
+            <div class="mb-4">
+                <span class="text-lg font-semibold text-gray-700">Predicted Category: </span>
+                <span id="predicted-category" class="text-xl font-bold text-blue-600"></span>
+            </div>
+            <div>
+                <span class="text-lg font-semibold text-gray-700">Top Influential Words:</span>
+                <ul id="important-words" class="mt-2 text-gray-600 list-disc list-inside space-y-1">
+                    <!-- Important words will be dynamically added here -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const predictButton = document.getElementById('predict-button');
+            const reviewInput = document.getElementById('review-input');
+            const resultsDiv = document.getElementById('results');
+            const loadingSpinner = document.getElementById('loading');
+            const predictedCategorySpan = document.getElementById('predicted-category');
+            const importantWordsList = document.getElementById('important-words');
+
+            // --- Simplified, hardcoded model data ---
+            // In a real application, you would export this data from your Python script.
+            const categories = ['Tech', 'Fashion', 'Health', 'Lifestyle', 'Gaming'];
+
+            // Simplified vocabulary and IDF values
+            const vocabulary = {
+                'ai': 0, 'technology': 1, 'health': 2, 'fitness': 3, 'style': 4,
+                'gaming': 5, 'console': 6, 'clothes': 7, 'food': 8, 'book': 9
+            };
+            const idf = [1.5, 1.5, 1.8, 1.9, 1.7, 1.6, 1.9, 1.8, 1.7, 1.6];
+
+            // Simplified Naive Bayes model probabilities (log probabilities for each class)
+            // This is a stand-in for the real model's fitted parameters
+            const classLogProbabilities = {
+                'Tech': [-2.0, -1.5, -3.0, -3.5, -4.0, -4.5, -5.0, -5.5, -6.0, -6.5],
+                'Fashion': [-3.0, -4.0, -5.0, -5.5, -1.5, -6.0, -6.5, -2.0, -5.5, -5.0],
+                'Health': [-4.0, -5.0, -1.5, -1.0, -5.5, -6.0, -6.5, -5.0, -3.5, -4.0],
+                'Lifestyle': [-3.5, -4.5, -3.0, -2.5, -3.5, -4.0, -4.5, -4.0, -2.0, -2.5],
+                'Gaming': [-2.5, -3.5, -4.5, -5.0, -5.5, -1.0, -1.5, -5.5, -5.0, -4.5]
+            };
+
+            // --- Text Cleaning Function (replicated from Python) ---
+            function cleanText(text) {
+                text = text.replace(/http\S+|www\S+|https\S+/g, '');
+                text = text.replace(/@w+|\#/g, '');
+                text = text.replace(/[^A-Za-z\s]/g, '');
+                text = text.toLowerCase();
+                text = text.replace(/\s+/g, ' ').trim();
+                return text;
+            }
+
+            // --- Core Prediction Logic ---
+            function predictReview(review) {
+                const cleanedReview = cleanText(review);
+                const words = cleanedReview.split(' ');
+
+                // Calculate TF-IDF for the input review
+                const inputVector = new Array(Object.keys(vocabulary).length).fill(0);
+                const termFrequencies = {};
+
+                // Calculate term frequency
+                words.forEach(word => {
+                    if (vocabulary.hasOwnProperty(word)) {
+                        termFrequencies[word] = (termFrequencies[word] || 0) + 1;
+                    }
+                });
+
+                // Calculate TF-IDF and populate the vector
+                const importantWords = [];
+                for (const word in termFrequencies) {
+                    const tf = termFrequencies[word];
+                    const idx = vocabulary[word];
+                    const tfidfScore = tf * idf[idx];
+                    inputVector[idx] = tfidfScore;
+                    importantWords.push({ word, score: tfidfScore });
+                }
+
+                // Naive Bayes prediction
+                let maxProb = -Infinity;
+                let predictedCategory = '';
+
+                for (const category of categories) {
+                    let categoryProb = 0;
+                    const logProbs = classLogProbabilities[category];
+                    for (let i = 0; i < inputVector.length; i++) {
+                        // This is a simplified calculation, a real Naive Bayes would be more complex
+                        // and would sum the log probabilities of the words.
+                        if (inputVector[i] > 0) {
+                             categoryProb += logProbs[i] * inputVector[i];
+                        }
+                    }
+                    if (categoryProb > maxProb) {
+                        maxProb = categoryProb;
+                        predictedCategory = category;
+                    }
+                }
+
+                // Sort important words by score
+                const importantWordsSorted = importantWords.sort((a, b) => b.score - a.score);
+
+                return {
+                    category: predictedCategory,
+                    importantWords: importantWordsSorted.slice(0, 5)
+                };
+            }
+
+            predictButton.addEventListener('click', () => {
+                const reviewText = reviewInput.value;
+                if (!reviewText.trim()) {
+                    // Show a message to the user that the input is empty
+                    alert("Please enter a review to classify.");
+                    return;
+                }
+
+                // Show loading spinner and hide previous results
+                loadingSpinner.classList.remove('hidden');
+                resultsDiv.classList.add('hidden');
+
+                // Simulate a slight delay for a better user experience
+                setTimeout(() => {
+                    const prediction = predictReview(reviewText);
+
+                    // Hide loading spinner
+                    loadingSpinner.classList.add('hidden');
+
+                    // Update UI with results
+                    predictedCategorySpan.textContent = prediction.category;
+                    importantWordsList.innerHTML = '';
+                    prediction.importantWords.forEach(item => {
+                        const li = document.createElement('li');
+                        li.textContent = `🔹 ${item.word} (score: ${item.score.toFixed(4)})`;
+                        importantWordsList.appendChild(li);
+                    });
+
+                    // Show the results section
+                    resultsDiv.classList.remove('hidden');
+                }, 1000);
+            });
+        });
+    </script>
+</body>
+</html>
